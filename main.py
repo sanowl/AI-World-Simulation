@@ -6,19 +6,20 @@ import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
 from collections import deque, namedtuple
-from typing import List, Tuple
+from typing import List, Tuple, Dict
 import heapq
 import math
+from scipy.spatial import cKDTree
 
-# Initialize Pygame
+
 pygame.init()
 
-# Screen dimensions
-WIDTH, HEIGHT = 1200, 800
-screen = pygame.display.set_mode((WIDTH, HEIGHT))
-pygame.display.set_caption("Ultra-Advanced AI World Simulation V2")
 
-# Colors
+WIDTH, HEIGHT = 1600, 900
+screen = pygame.display.set_mode((WIDTH, HEIGHT))
+pygame.display.set_caption("Advanced AI World Simulation V3")
+
+
 WHITE = (255, 255, 255)
 BLACK = (0, 0, 0)
 RED = (255, 0, 0)
@@ -27,10 +28,9 @@ BLUE = (0, 0, 255)
 YELLOW = (255, 255, 0)
 PURPLE = (128, 0, 128)
 
-# Clock for controlling frame rate
+
 clock = pygame.time.Clock()
 
-# Define a Tile class for the world grid
 class Tile:
     def __init__(self, type: str, passable: bool, resource: int = 0):
         self.type = type
@@ -48,7 +48,6 @@ class Tile:
             'desert': (244, 164, 96)
         }.get(self.type, WHITE)
         
-        # Apply pollution effect
         pollution_factor = min(self.pollution / 100, 1)
         color = tuple(int(c * (1 - pollution_factor) + 100 * pollution_factor) for c in color)
         
@@ -56,7 +55,6 @@ class Tile:
         if self.resource > 0:
             pygame.draw.circle(screen, YELLOW, (x + size // 2, y + size // 2), size // 4)
 
-# World class
 class World:
     def __init__(self, width: int, height: int):
         self.width = width
@@ -65,41 +63,29 @@ class World:
         self.generate_world()
         self.weather = 'clear'
         self.weather_timer = 0
+        self.agents = []
+        self.kdtree = None
 
     def generate_world(self):
-        # Generate water bodies
         for _ in range(5):
-            x, y = random.randint(0, self.width - 1), random.randint(0, self.height - 1)
-            self.generate_blob(x, y, 'water', 0.2)
-
-        # Generate forests
+            self.generate_blob('water', 0.2)
         for _ in range(10):
-            x, y = random.randint(0, self.width - 1), random.randint(0, self.height - 1)
-            self.generate_blob(x, y, 'forest', 0.15)
-
-        # Generate mountains
+            self.generate_blob('forest', 0.15)
         for _ in range(3):
-            x, y = random.randint(0, self.width - 1), random.randint(0, self.height - 1)
-            self.generate_blob(x, y, 'mountain', 0.1)
-
-        # Generate deserts
+            self.generate_blob('mountain', 0.1)
         for _ in range(2):
-            x, y = random.randint(0, self.width - 1), random.randint(0, self.height - 1)
-            self.generate_blob(x, y, 'desert', 0.1)
-
-        # Generate cities
+            self.generate_blob('desert', 0.1)
         for _ in range(5):
             x, y = random.randint(0, self.width - 1), random.randint(0, self.height - 1)
             if self.grid[y][x].type == 'grass':
                 self.grid[y][x] = Tile('city', True)
-
-        # Add resources
         for _ in range(50):
             x, y = random.randint(0, self.width - 1), random.randint(0, self.height - 1)
             if self.grid[y][x].type in ['grass', 'forest', 'desert']:
                 self.grid[y][x].resource = random.randint(50, 100)
 
-    def generate_blob(self, x: int, y: int, tile_type: str, size_factor: float):
+    def generate_blob(self, tile_type: str, size_factor: float):
+        x, y = random.randint(0, self.width - 1), random.randint(0, self.height - 1)
         queue = [(x, y)]
         visited = set()
         while queue:
@@ -128,13 +114,15 @@ class World:
                     if self.grid[y][x].type in ['forest', 'grass']:
                         self.grid[y][x].resource = max(0, self.grid[y][x].resource - 1)
 
-    def draw(self, screen):
+    def draw(self, screen, camera):
         tile_size = min(WIDTH // self.width, HEIGHT // self.height)
         for y in range(self.height):
             for x in range(self.width):
-                self.grid[y][x].draw(screen, x * tile_size, y * tile_size, tile_size)
+                screen_x = x * tile_size - camera[0]
+                screen_y = y * tile_size - camera[1]
+                if 0 <= screen_x < WIDTH and 0 <= screen_y < HEIGHT:
+                    self.grid[y][x].draw(screen, screen_x, screen_y, tile_size)
 
-        # Draw weather effect
         if self.weather == 'rainy':
             for _ in range(100):
                 rx = random.randint(0, WIDTH)
@@ -146,9 +134,11 @@ class World:
                 ry = random.randint(0, HEIGHT)
                 pygame.draw.line(screen, (255, 255, 0), (rx, ry), (rx + random.randint(-20, 20), ry + random.randint(-20, 20)), 2)
 
-# Agent class
+    def update_kdtree(self):
+        self.kdtree = cKDTree([(agent.x, agent.y) for agent in self.agents])
+
 class Agent:
-    def __init__(self, x: int, y: int, agent_type: str):
+    def __init__(self, x: int, y: int, agent_type: str, communication_range: int = 5):
         self.x = x
         self.y = y
         self.type = agent_type
@@ -159,8 +149,14 @@ class Agent:
         self.skills = {
             'gathering': random.random(),
             'exploration': random.random(),
-            'crafting': random.random()
+            'crafting': random.random(),
+            'trading': random.random()
         }
+        self.communication_range = communication_range
+        self.memory = deque(maxlen=100)  # Limit memory size
+        self.mood = "neutral"
+        self.long_term_goal = random.choice(["resource_master", "explorer", "trader"])
+        self.goal_progress = 0
 
     def move(self, dx: int, dy: int, world: World):
         new_x, new_y = self.x + dx, self.y + dy
@@ -176,6 +172,8 @@ class Agent:
             self.inventory += gathered
             self.energy -= 2
             tile.pollution += 1
+            if self.long_term_goal == "resource_master":
+                self.goal_progress += gathered
 
     def rest(self):
         self.energy = min(100, self.energy + 10)
@@ -187,36 +185,80 @@ class Agent:
             self.skills['crafting'] += 0.05
             self.energy -= 5
 
-    def draw(self, screen, tile_size: int):
+    def communicate(self, world: World):
+        nearby_agents = world.kdtree.query_ball_point((self.x, self.y), self.communication_range)
+        for idx in nearby_agents:
+            agent = world.agents[idx]
+            if agent != self:
+                message = {
+                    'x': self.x, 'y': self.y, 'type': self.type,
+                    'inventory': self.inventory, 'health': self.health,
+                    'mood': self.mood, 'goal': self.long_term_goal
+                }
+                agent.receive_message(message)
+
+    def receive_message(self, message: dict):
+        self.memory.append(message)
+        if message['type'] == 'gatherer' and message['inventory'] > 50:
+            self.mood = 'interested'
+        if message['goal'] == self.long_term_goal and message['type'] != self.type:
+            self.mood = 'competitive'
+
+    def trade(self, other_agent):
+        if self.inventory > 0 and other_agent.inventory > 0:
+            trade_amount = min(self.inventory, other_agent.inventory, 10)
+            self.inventory -= trade_amount
+            other_agent.inventory -= trade_amount
+            self.inventory += trade_amount
+            other_agent.inventory += trade_amount
+            self.skills['trading'] += 0.05
+            other_agent.skills['trading'] += 0.05
+            if self.long_term_goal == "trader":
+                self.goal_progress += trade_amount
+
+    def reproduce(self, world: World):
+        if self.health > 80 and self.energy > 80:
+            offspring = Agent(self.x, self.y, self.type)
+            for skill in self.skills:
+                offspring.skills[skill] = (self.skills[skill] + random.random()) / 2
+            offspring.long_term_goal = random.choice(["resource_master", "explorer", "trader"])
+            world.agents.append(offspring)
+            self.energy -= 50
+
+    def draw(self, screen, tile_size: int, camera):
         color = RED if self.type == 'explorer' else BLUE if self.type == 'gatherer' else PURPLE
-        pygame.draw.circle(screen, color, 
-                           (self.x * tile_size + tile_size // 2, 
-                            self.y * tile_size + tile_size // 2), 
-                           tile_size // 3)
+        screen_x = self.x * tile_size - camera[0]
+        screen_y = self.y * tile_size - camera[1]
+        if 0 <= screen_x < WIDTH and 0 <= screen_y < HEIGHT:
+            pygame.draw.circle(screen, color, (screen_x + tile_size // 2, screen_y + tile_size // 2), tile_size // 3)
+            health_width = int(tile_size * self.health / 100)
+            pygame.draw.rect(screen, GREEN, (screen_x, screen_y - 5, health_width, 3))
 
-        # Draw health bar
-        health_width = int(tile_size * self.health / 100)
-        pygame.draw.rect(screen, GREEN, (self.x * tile_size, self.y * tile_size - 5, health_width, 3))
-
-    def update(self):
+    def update(self, world: World):
         self.age += 1
         if self.age % 100 == 0:
             self.health -= 1
+        if self.long_term_goal == "explorer":
+            if world.grid[self.y][self.x].type not in ['grass', 'city']:
+                self.goal_progress += 1
+        self.energy = max(0, self.energy - 0.1)
+        if self.energy <= 0 or self.health <= 0:
+            return False
+        return True
 
-# Neural Network for the agent's brain
 class AgentNN(nn.Module):
     def __init__(self, input_size: int, hidden_size: int, output_size: int):
         super(AgentNN, self).__init__()
-        self.fc1 = nn.Linear(input_size, hidden_size)
-        self.fc2 = nn.Linear(hidden_size, hidden_size)
-        self.fc3 = nn.Linear(hidden_size, output_size)
+        self.lstm = nn.LSTM(input_size, hidden_size, batch_first=True)
+        self.fc1 = nn.Linear(hidden_size, hidden_size)
+        self.fc2 = nn.Linear(hidden_size, output_size)
 
-    def forward(self, x):
-        x = F.relu(self.fc1(x))
-        x = F.relu(self.fc2(x))
-        return self.fc3(x)
+    def forward(self, x, hidden):
+        x, hidden = self.lstm(x, hidden)
+        x = F.relu(self.fc1(x[:, -1, :]))
+        x = self.fc2(x)
+        return x, hidden
 
-# Replay Memory
 Experience = namedtuple('Experience', ('state', 'action', 'reward', 'next_state', 'done'))
 
 class ReplayMemory:
@@ -232,7 +274,8 @@ class ReplayMemory:
     def __len__(self):
         return len(self.memory)
 
-# DQN Agent
+
+
 class DQNAgent:
     def __init__(self, state_size: int, action_size: int):
         self.state_size = state_size
@@ -251,14 +294,15 @@ class DQNAgent:
         self.target_net.eval()
 
         self.optimizer = optim.Adam(self.policy_net.parameters(), lr=self.learning_rate)
+        self.hidden = None
 
     def act(self, state: np.ndarray) -> int:
         if random.random() <= self.epsilon:
             return random.choice(range(self.action_size))
         with torch.no_grad():
-            state = torch.FloatTensor(state).unsqueeze(0).to(self.device)
-            action_values = self.policy_net(state)
-            return action_values.argmax().item()
+            state = torch.FloatTensor(state).unsqueeze(0).unsqueeze(0).to(self.device)
+            action_values, self.hidden = self.policy_net(state, self.hidden)
+            return action_values.max(1)[1].item()
 
     def learn(self):
         if len(self.memory) < 64:
@@ -267,14 +311,19 @@ class DQNAgent:
         experiences = self.memory.sample(64)
         batch = Experience(*zip(*experiences))
 
-        state_batch = torch.FloatTensor(batch.state).to(self.device)
+        state_batch = torch.FloatTensor(batch.state).unsqueeze(1).to(self.device)
         action_batch = torch.LongTensor(batch.action).unsqueeze(1).to(self.device)
         reward_batch = torch.FloatTensor(batch.reward).unsqueeze(1).to(self.device)
-        next_state_batch = torch.FloatTensor(batch.next_state).to(self.device)
+        next_state_batch = torch.FloatTensor(batch.next_state).unsqueeze(1).to(self.device)
         done_batch = torch.FloatTensor(batch.done).unsqueeze(1).to(self.device)
 
-        q_values = self.policy_net(state_batch).gather(1, action_batch)
-        next_q_values = self.target_net(next_state_batch).max(1)[0].unsqueeze(1).detach()
+        q_values, _ = self.policy_net(state_batch, None)
+        q_values = q_values.gather(1, action_batch)
+
+        with torch.no_grad():
+            next_q_values, _ = self.target_net(next_state_batch, None)
+            next_q_values = next_q_values.max(1)[0].unsqueeze(1)
+
         expected_q_values = reward_batch + (self.gamma * next_q_values * (1 - done_batch))
 
         loss = F.smooth_l1_loss(q_values, expected_q_values)
@@ -288,59 +337,24 @@ class DQNAgent:
     def update_target_network(self):
         self.target_net.load_state_dict(self.policy_net.state_dict())
 
-# A* Pathfinding
-def heuristic(a: Tuple[int, int], b: Tuple[int, int]) -> float:
-    return abs(a[0] - b[0]) + abs(a[1] - b[1])
-
-def a_star(world: World, start: Tuple[int, int], goal: Tuple[int, int]) -> List[Tuple[int, int]]:
-    neighbors = [(0,1), (0,-1), (1,0), (-1,0), (1,1), (1,-1), (-1,1), (-1,-1)]
-    close_set = set()
-    came_from = {}
-    gscore = {start:0}
-    fscore = {start:heuristic(start, goal)}
-    open_set = []
-    heapq.heappush(open_set, (fscore[start], start))
-    
-    while open_set:
-        current = heapq.heappop(open_set)[1]
-        
-        if current == goal:
-            path = []
-            while current in came_from:
-                path.append(current)
-                current = came_from[current]
-            path.append(start)
-            path.reverse()
-            return path
-        
-        close_set.add(current)
-        
-        for i, j in neighbors:
-            neighbor = current[0] + i, current[1] + j
-            if 0 <= neighbor[0] < world.width and 0 <= neighbor[1] < world.height:
-                if not world.grid[neighbor[1]][neighbor[0]].passable:
-                    continue
-                tentative_g_score = gscore[current] + heuristic(current, neighbor)
-                
-                if neighbor in close_set and tentative_g_score >= gscore.get(neighbor, float('inf')):
-                    continue
-
-
-# Simulation class
 class Simulation:
     def __init__(self, world_width: int, world_height: int, num_agents: int):
         self.world = World(world_width, world_height)
         self.agents = []
         self.dqn_agents = []
         self.step_count = 0
+        self.camera = [0, 0]
+        self.zoom = 1.0
         
         for _ in range(num_agents):
             x, y = random.randint(0, world_width - 1), random.randint(0, world_height - 1)
             while not self.world.grid[y][x].passable:
                 x, y = random.randint(0, world_width - 1), random.randint(0, world_height - 1)
             agent_type = random.choice(['explorer', 'gatherer', 'crafter'])
-            self.agents.append(Agent(x, y, agent_type))
-            self.dqn_agents.append(DQNAgent(12, 7))  # 12 state variables, 7 possible actions
+            agent = Agent(x, y, agent_type)
+            self.agents.append(agent)
+            self.world.agents.append(agent)
+            self.dqn_agents.append(DQNAgent(16, 8))  # 16 state variables, 8 possible actions
 
     def get_state(self, agent: Agent) -> np.ndarray:
         tile = self.world.grid[agent.y][agent.x]
@@ -355,10 +369,14 @@ class Simulation:
             agent.skills['gathering'],
             agent.skills['exploration'],
             agent.skills['crafting'],
+            agent.skills['trading'],
             1 if tile.type == 'city' else 0,
             nearest_resource / (self.world.width + self.world.height) if nearest_resource else 1,
             nearest_city / (self.world.width + self.world.height) if nearest_city else 1,
-            tile.pollution / 100
+            tile.pollution / 100,
+            agent.goal_progress / 1000,
+            len(agent.memory) / 100,
+            {'neutral': 0, 'happy': 1, 'interested': 2, 'competitive': 3}[agent.mood]
         ])
 
     def find_nearest_resource(self, agent: Agent) -> float:
@@ -382,12 +400,12 @@ class Simulation:
     def step(self):
         self.world.update_weather()
         self.world.apply_weather_effects()
+        self.world.update_kdtree()
 
-        for agent, dqn_agent in zip(self.agents, self.dqn_agents):
+        for agent, dqn_agent in zip(self.agents[:], self.dqn_agents):
             state = self.get_state(agent)
             action = dqn_agent.act(state)
             
-            # Execute action
             if action == 0:  # Move North
                 agent.move(0, -1, self.world)
             elif action == 1:  # Move South
@@ -402,23 +420,27 @@ class Simulation:
                 agent.rest()
             elif action == 6:  # Craft
                 agent.craft()
+            elif action == 7:  # Trade
+                nearby_agents = self.world.kdtree.query_ball_point((agent.x, agent.y), 1)
+                for idx in nearby_agents:
+                    other_agent = self.world.agents[idx]
+                    if other_agent != agent:
+                        agent.trade(other_agent)
+                        break
             
-            # Calculate reward
+            agent.communicate(self.world)
+            agent.reproduce(self.world)
+            
             reward = self.calculate_reward(agent)
-            
-            # Get new state
             next_state = self.get_state(agent)
             
-            # Store experience in memory
             dqn_agent.memory.push(state, action, reward, next_state, False)
-            
-            # Learn from experience
             dqn_agent.learn()
 
-            # Update agent
-            agent.update()
+            if not agent.update(self.world):
+                self.agents.remove(agent)
+                self.world.agents.remove(agent)
         
-        # Update target networks periodically
         if self.step_count % 100 == 0:
             for dqn_agent in self.dqn_agents:
                 dqn_agent.update_target_network()
@@ -429,62 +451,80 @@ class Simulation:
         reward = 0
         tile = self.world.grid[agent.y][agent.x]
 
-        # Basic survival reward
         reward += 0.1 if agent.health > 50 else -0.1
         reward += 0.1 if agent.energy > 50 else -0.1
 
-        # Type-specific rewards
         if agent.type == 'explorer':
             if tile.type not in ['grass', 'city']:
-                reward += 0.2  # Reward for exploring diverse terrain
+                reward += 0.2
         elif agent.type == 'gatherer':
-            reward += 0.1 * agent.inventory  # Reward for holding resources
+            reward += 0.1 * agent.inventory
         elif agent.type == 'crafter':
-            reward += agent.skills['crafting'] * 0.5  # Reward for high crafting skill
+            reward += agent.skills['crafting'] * 0.5
 
-        # Resource management
         if agent.inventory > 0 and tile.type == 'city':
-            reward += agent.inventory * 0.2  # Reward for bringing resources to city
-            agent.inventory = 0  # Empty inventory in city
+            reward += agent.inventory * 0.2
+            agent.inventory = 0
 
-        # Environmental factors
-        reward -= tile.pollution * 0.1  # Penalty for being in polluted areas
-
-        # Skill improvement
-        reward += sum(agent.skills.values()) * 0.1  # Small reward for overall skill improvement
+        reward -= tile.pollution * 0.1
+        reward += sum(agent.skills.values()) * 0.1
+        reward += agent.goal_progress * 0.01
 
         return reward
 
     def draw(self, screen):
-        self.world.draw(screen)
-        tile_size = min(WIDTH // self.world.width, HEIGHT // self.world.height)
+        self.world.draw(screen, self.camera)
+        tile_size = int(min(WIDTH // self.world.width, HEIGHT // self.world.height) * self.zoom)
         for agent in self.agents:
-            agent.draw(screen, tile_size)
+            agent.draw(screen, tile_size, self.camera)
 
-# Main game loop
+        font = pygame.font.Font(None, 36)
+        step_text = font.render(f"Step: {self.step_count}", True, WHITE)
+        screen.blit(step_text, (10, 10))
+        weather_text = font.render(f"Weather: {self.world.weather}", True, WHITE)
+        screen.blit(weather_text, (10, 50))
+        agents_text = font.render(f"Agents: {len(self.agents)}", True, WHITE)
+        screen.blit(agents_text, (10, 90))
+
 def main():
-    simulation = Simulation(world_width=60, world_height=40, num_agents=20)
-    font = pygame.font.Font(None, 36)
+    simulation = Simulation(world_width=100, world_height=75, num_agents=50)
     running = True
+    paused = False
 
     while running:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
+            elif event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_SPACE:
+                    paused = not paused
+                elif event.key == pygame.K_PLUS or event.key == pygame.K_EQUALS:
+                    simulation.zoom *= 1.1
+                elif event.key == pygame.K_MINUS:
+                    simulation.zoom /= 1.1
+            elif event.type == pygame.MOUSEBUTTONDOWN:
+                if event.button == 4:  # Scroll up
+                    simulation.zoom *= 1.1
+                elif event.button == 5:  # Scroll down
+                    simulation.zoom /= 1.1
 
-        simulation.step()
+        keys = pygame.key.get_pressed()
+        if keys[pygame.K_LEFT]:
+            simulation.camera[0] -= 5
+        if keys[pygame.K_RIGHT]:
+            simulation.camera[0] += 5
+        if keys[pygame.K_UP]:
+            simulation.camera[1] -= 5
+        if keys[pygame.K_DOWN]:
+            simulation.camera[1] += 5
+
+        if not paused:
+            simulation.step()
 
         screen.fill(BLACK)
         simulation.draw(screen)
-
-        # Display step count and weather
-        step_text = font.render(f"Step: {simulation.step_count}", True, WHITE)
-        screen.blit(step_text, (10, 10))
-        weather_text = font.render(f"Weather: {simulation.world.weather}", True, WHITE)
-        screen.blit(weather_text, (10, 50))
-
         pygame.display.flip()
-        clock.tick(30)  # Limit to 30 FPS for better observation
+        clock.tick(30)
 
     pygame.quit()
 
