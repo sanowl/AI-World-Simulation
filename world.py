@@ -1,6 +1,6 @@
-import random
 from tile import Tile
 from scipy.spatial import cKDTree
+import secrets
 
 class World:
     def __init__(self, width: int, height: int):
@@ -23,21 +23,21 @@ class World:
         for _ in range(2):
             self.generate_blob('desert', 0.1)
         for _ in range(5):
-            x, y = random.randint(0, self.width - 1), random.randint(0, self.height - 1)
+            x, y = secrets.SystemRandom().randint(0, self.width - 1), secrets.SystemRandom().randint(0, self.height - 1)
             if self.grid[y][x].type == 'grass':
                 self.grid[y][x] = Tile('city', True)
         for _ in range(50):
-            x, y = random.randint(0, self.width - 1), random.randint(0, self.height - 1)
+            x, y = secrets.SystemRandom().randint(0, self.width - 1), secrets.SystemRandom().randint(0, self.height - 1)
             if self.grid[y][x].type in ['grass', 'forest', 'desert']:
-                self.grid[y][x].resource = random.randint(50, 100)
+                self.grid[y][x].resource = secrets.SystemRandom().randint(50, 100)
 
     def generate_blob(self, tile_type: str, size_factor: float):
-        x, y = random.randint(0, self.width - 1), random.randint(0, self.height - 1)
+        x, y = secrets.SystemRandom().randint(0, self.width - 1), secrets.SystemRandom().randint(0, self.height - 1)
         queue = [(x, y)]
         visited = set()
         while queue:
             cx, cy = queue.pop(0)
-            if (cx, cy) in visited or random.random() > size_factor:
+            if (cx, cy) in visited or secrets.SystemRandom().random() > size_factor:
                 continue
             visited.add((cx, cy))
             if 0 <= cx < self.width and 0 <= cy < self.height:
@@ -48,8 +48,8 @@ class World:
     def update_weather(self):
         self.weather_timer -= 1
         if self.weather_timer <= 0:
-            self.weather = random.choice(['clear', 'rainy', 'stormy'])
-            self.weather_timer = random.randint(100, 300)
+            self.weather = secrets.choice(['clear', 'rainy', 'stormy'])
+            self.weather_timer = secrets.SystemRandom().randint(100, 300)
 
     def apply_weather_effects(self):
         for y in range(self.height):
@@ -72,14 +72,14 @@ class World:
 
         if self.weather == 'rainy':
             for _ in range(100):
-                rx = random.randint(0, screen.get_width())
-                ry = random.randint(0, screen.get_height())
+                rx = secrets.SystemRandom().randint(0, screen.get_width())
+                ry = secrets.SystemRandom().randint(0, screen.get_height())
                 pygame.draw.line(screen, (200, 200, 255), (rx, ry), (rx, ry + 10), 1)
         elif self.weather == 'stormy':
             for _ in range(5):
-                rx = random.randint(0, screen.get_width())
-                ry = random.randint(0, screen.get_height())
-                pygame.draw.line(screen, (255, 255, 0), (rx, ry), (rx + random.randint(-20, 20), ry + random.randint(-20, 20)), 2)
+                rx = secrets.SystemRandom().randint(0, screen.get_width())
+                ry = secrets.SystemRandom().randint(0, screen.get_height())
+                pygame.draw.line(screen, (255, 255, 0), (rx, ry), (rx + secrets.SystemRandom().randint(-20, 20), ry + secrets.SystemRandom().randint(-20, 20)), 2)
 
     def update_kdtree(self):
         self.kdtree = cKDTree([(agent.x, agent.y) for agent in self.agents])

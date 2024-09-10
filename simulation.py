@@ -1,4 +1,3 @@
-import random
 import math
 from typing import Callable, Dict, Optional, List
 import pygame
@@ -6,6 +5,7 @@ import numpy as np
 from world import World
 from agent import Agent
 from dqn_agent import DQNAgent
+import secrets
 
 class Simulation:
     def __init__(self, world_width: int, world_height: int, num_agents: int):
@@ -32,7 +32,7 @@ class Simulation:
     def initialize_agents(self, num_agents: int, world_width: int, world_height: int) -> None:
         for _ in range(num_agents):
             x, y = self.find_passable_location(world_width, world_height)
-            agent_type = random.choice(['explorer', 'gatherer', 'crafter'])
+            agent_type = secrets.choice(['explorer', 'gatherer', 'crafter'])
             agent = Agent(x, y, agent_type)
             self.agents.append(agent)
             self.world.agents.append(agent)
@@ -40,7 +40,7 @@ class Simulation:
 
     def find_passable_location(self, width: int, height: int) -> tuple:
         while True:
-            x, y = random.randint(0, width - 1), random.randint(0, height - 1)
+            x, y = secrets.SystemRandom().randint(0, width - 1), secrets.SystemRandom().randint(0, height - 1)
             if self.world.grid[y][x].passable:
                 return x, y
 

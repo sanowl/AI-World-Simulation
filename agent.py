@@ -1,6 +1,6 @@
-import random
 from collections import deque
 import pygame
+import secrets
 
 class Agent:
     def __init__(self, x: int, y: int, agent_type: str, communication_range: int = 5):
@@ -12,15 +12,15 @@ class Agent:
         self.energy = 100
         self.age = 0
         self.skills = {
-            'gathering': random.random(),
-            'exploration': random.random(),
-            'crafting': random.random(),
-            'trading': random.random()
+            'gathering': secrets.SystemRandom().random(),
+            'exploration': secrets.SystemRandom().random(),
+            'crafting': secrets.SystemRandom().random(),
+            'trading': secrets.SystemRandom().random()
         }
         self.communication_range = communication_range
         self.memory = deque(maxlen=100)  # Limit memory size
         self.mood = "neutral"
-        self.long_term_goal = random.choice(["resource_master", "explorer", "trader"])
+        self.long_term_goal = secrets.choice(["resource_master", "explorer", "trader"])
         self.goal_progress = 0
 
     def move(self, dx: int, dy: int, world):
@@ -85,8 +85,8 @@ class Agent:
         if self.health > 80 and self.energy > 80:
             offspring = Agent(self.x, self.y, self.type)
             for skill in self.skills:
-                offspring.skills[skill] = (self.skills[skill] + random.random()) / 2
-            offspring.long_term_goal = random.choice(["resource_master", "explorer", "trader"])
+                offspring.skills[skill] = (self.skills[skill] + secrets.SystemRandom().random()) / 2
+            offspring.long_term_goal = secrets.choice(["resource_master", "explorer", "trader"])
             world.agents.append(offspring)
             self.energy -= 50
 
