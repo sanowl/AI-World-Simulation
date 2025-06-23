@@ -1,10 +1,10 @@
-import random
 import torch
 import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
 from collections import deque, namedtuple
 import numpy as np
+import secrets
 
 Experience = namedtuple('Experience', ('state', 'action', 'reward', 'next_state', 'done'))
 
@@ -16,7 +16,7 @@ class ReplayMemory:
         self.memory.append(Experience(*args))
 
     def sample(self, batch_size: int):
-        return random.sample(self.memory, batch_size)
+        return secrets.SystemRandom().sample(self.memory, batch_size)
 
     def __len__(self):
         return len(self.memory)
@@ -55,8 +55,8 @@ class DQNAgent:
         self.hidden = None
 
     def act(self, state: np.ndarray) -> int:
-        if random.random() <= self.epsilon:
-            return random.choice(range(self.action_size))
+        if secrets.SystemRandom().random() <= self.epsilon:
+            return secrets.choice(range(self.action_size))
         with torch.no_grad():
             state = torch.FloatTensor(state).unsqueeze(0).unsqueeze(0).to(self.device)
             action_values, self.hidden = self.policy_net(state, self.hidden)
